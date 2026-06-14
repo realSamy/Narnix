@@ -1,0 +1,67 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "narnix",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-14",
+  "observability": {
+    "enabled": false
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      // Replace both with your own. Create the database first:
+      //   wrangler d1 create narnix-db
+      // and paste the `database_id` it prints here. The name must match the one in the
+      // `db:migrate*` scripts in package.json.
+      "database_name": "narnix-db",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      // Schema changes go in `migrations/` as new numbered .sql files, applied with
+      // `pnpm db:migrate` (local) / `pnpm db:migrate:remote` (production). Never
+      // hand-edit the live schema — a column added by hand is invisible to source
+      // control and to every other environment.
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SESSION_KV",
+      // Create with: wrangler kv namespace create SESSION_KV
+      "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+    }
+  ],
+  // Deployment identity deliberately does NOT live here.
+  //
+  // `vars` is plaintext in a file that belongs in source control. The owner user id and
+  // the locked channel id are not cryptographic secrets, but they are
+  // (a) specific to one operator, which makes the repo non-reusable, and (b) an
+  // unnecessary public statement of who administers the bot and where. They are
+  // configuration, not source.
+  //
+  // Where they come from instead:
+  //   local  — `.dev.vars` (gitignored; copy `.dev.vars.example`). Both `wrangler dev`
+  //            and `getPlatformProxy()` in `src/poll.ts` read it.
+  //   remote — Worker secrets, set once per environment:
+  //              wrangler secret put BOT_TOKEN
+  //              wrangler secret put OWNER
+  //              wrangler secret put CHANNEL_LOCK
+  //              wrangler secret put CHANNEL_LOCK_LINK
+  //
+  // A missing one does not fail silently: `assertEnv` in `src/core/env.ts` logs the
+  // exact names at the top of every invocation that is missing them.
+
+  // Cron Triggers are free on the Workers Free plan (5 per account).
+  //
+  // `src/jobs/index.ts` dispatches on `event.cron` — the literal string, matched as
+  // text. Add a second job by adding its expression here *and* a branch there, copying
+  // the string exactly; a branch that differs by one character never runs and its work
+  // silently falls through to the every-minute drain.
+  //
+  // Split jobs across separate expressions rather than folding them into one branch:
+  // each scheduled invocation gets its own 50-subrequest budget, so two triggers never
+  // compete for it.
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  }
+}

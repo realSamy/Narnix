@@ -1,0 +1,38 @@
+# Secrets. `.dev.vars` is what wrangler reads for local development, so it holds a real
+# BOT_TOKEN once you fill it in — it must never be committed. `.dev.vars.*` covers the
+# per-environment variants; `.dev.vars.example` is negated back in because the template
+# needs it tracked as the list of names to copy.
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.env
+.env
+.env.*
+
+# Dependencies
+node_modules/
+
+# Build output — wrangler bundles from src/, dist/ is not deployed
+dist/
+
+# Wrangler / miniflare local state (includes the local D1 sqlite file)
+.wrangler/
+.mf/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# npm's lockfile. This project is pnpm-only (pnpm-workspace.yaml, pnpm-lock.yaml);
+# a second lockfile drifts from the first and installs a different tree.
+package-lock.json

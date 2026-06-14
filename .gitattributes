@@ -1,0 +1,13 @@
+# Normalise line endings on the way into the repository and check out LF everywhere.
+#
+# Without this, every file committed from Windows lands with CRLF and the next clone on
+# Linux or macOS shows the whole tree as modified. It matters more than usual here: the
+# deploy target is Cloudflare Workers and CI runs on Linux, so the checked-out bytes
+# should match what those see regardless of who committed.
+* text=auto eol=lf
+
+# Lockfile: generated, and diffing it line by line is never useful in review.
+pnpm-lock.yaml -diff linguist-generated
+
+# SQL migrations are append-only history — never merge them, resolve by adding a new file.
+migrations/*.sql -merge

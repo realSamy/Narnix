@@ -1,0 +1,30 @@
+{
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "poll": "tsx src/poll.ts",
+    "poll:watch": "nodemon --verbose --watch src --ext ts,json --exec \"pnpm poll\"",
+    "db:migrate": "wrangler d1 migrations apply narnix-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply narnix-db --remote",
+    "db:migrations": "wrangler d1 migrations list narnix-db --remote"
+  },
+  "name": "narnix",
+  "description": "A Telegram bot base for Cloudflare Workers: grammY, D1, i18n, wizards, tickets, broadcasts.",
+  "version": "1.0.0",
+  "dependencies": {
+    "@grammyjs/conversations": "^2.1.1",
+    "grammy": "^1.45.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260722.1",
+    "@types/node": "^26.1.1",
+    "socks-proxy-agent": "^10.1.0",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.113.0"
+  }
+}
