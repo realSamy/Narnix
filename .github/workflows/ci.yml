@@ -1,0 +1,63 @@
+# The three gates this project actually has: typecheck, the locale audit, and the wizard
+# smoke harness. Deliberately one job — they share an install and a migrated local
+# database, and splitting them would triple the setup cost to save nothing.
+#
+# `pnpm test` is NOT run here. It is a vitest entry point and this template ships no
+# test files; tests are out of scope for the project.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A force-push or a quick follow-up commit should cancel the run it supersedes rather
+# than queue behind it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Must come before setup-node: `cache: pnpm` below works by running
+      # `pnpm store path`, so pnpm has to already be on PATH.
+      #
+      # The version is pinned because `package.json` declares no `packageManager` (nor
+      # `devEngines.packageManager`) field, and without one this input is required.
+      # pnpm 10 is chosen to match `pnpm-lock.yaml`'s `lockfileVersion: 9.0` — and
+      # because pnpm/action-setup is now the action for pnpm 10 and older, with
+      # `pnpm/setup` the successor for 11+. If you add a `packageManager` field, drop
+      # this input and switch actions to match the version you declare.
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22 # wrangler 4 requires >=22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # `smoke.wizards.ts` drives the real bot against the local D1 in
+      # `.wrangler/state`, so the schema has to exist before it runs — an unmigrated
+      # database fails with "no such table". `--local` touches only the miniflare
+      # sqlite file, so this needs no Cloudflare credentials.
+      - name: Apply migrations to the local D1
+        run: pnpm db:migrate
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Locale audit
+        run: pnpm check:i18n
+
+      # Left last: it is the slowest gate and the one whose failures are most often
+      # explained by the two above.
+      - name: Wizard smoke test
+        run: pnpm smoke:wizards
