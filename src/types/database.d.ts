@@ -113,3 +113,36 @@ export interface TicketMessage {
   delivered_at: string | null;
   created_at: string;
 }
+
+/**
+ * A queued/running/finished broadcast job
+ */
+export type BroadcastStatus = "queued" | "running" | "done" | "cancelled";
+
+export interface Broadcast {
+  id: number;
+  /** The message body, already rendered in the language it will be sent in. */
+  message: string;
+  /** 'HTML' or NULL. Validated against Telegram before the job was queued. */
+  parse_mode: string | null;
+  created_by: number;
+  status: BroadcastStatus;
+  /** Keyset cursor: the highest users.id already attempted. 0 = nothing yet. */
+  cursor_user_id: number;
+  sent_count: number;
+  failed_count: number;
+  created_at: string;
+  finished_at: string | null;
+}
+
+/**
+ * One row of the conversation replay log (`conversations`).
+ *
+ * Named `…Row` because the conversations plugin already owns the name
+ * `Conversation` in this codebase.
+ */
+export interface ConversationRow {
+  key: string; // ctx.chatId, the plugin's default storage key
+  data: string; // JSON-serialised VersionedState<ConversationData>
+  updated_at: string;
+}
