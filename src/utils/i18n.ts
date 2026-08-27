@@ -3,6 +3,7 @@ import fa from "../locales/fa.json";
 import en from "../locales/en.json";
 import { Translator } from "../types/context";
 import { SupportedLanguage } from "../types/i18n";
+import { findUserById, setUserLanguage as persistUserLanguage } from "../core/db/repositories/users";
 
 export type { SupportedLanguage };
 
@@ -70,11 +71,7 @@ export function getTranslator(lang: string = "fa"): Translator {
  * row that has since been deleted.
  */
 export async function translatorFor(db: D1Database, userId: number): Promise<Translator> {
-  const row = await db
-    .prepare("SELECT lang FROM users WHERE id = ?")
-    .bind(userId)
-    .first<{ lang: string | null }>();
-
+  const row = await findUserById(db, userId);
   return getTranslator(normalizeLanguage(row?.lang));
 }
 
@@ -90,10 +87,7 @@ export async function getUserLanguage(
   db: D1Database,
   userId: number,
 ): Promise<SupportedLanguage | null> {
-  const row = await db
-    .prepare("SELECT lang FROM users WHERE id = ?")
-    .bind(userId)
-    .first<{ lang: string | null }>();
+  const row = await findUserById(db, userId);
 
   if (!row || row.lang === null) return null;
   return normalizeLanguage(row.lang);
@@ -115,10 +109,5 @@ export async function setUserLanguage(
   userId: number,
   lang: SupportedLanguage,
 ): Promise<boolean> {
-  const res = await db
-    .prepare("UPDATE users SET lang = ? WHERE id = ?")
-    .bind(lang, userId)
-    .run();
-
-  return res.success && res.meta.changes > 0;
+  return persistUserLanguage(db, userId, lang);
 }
