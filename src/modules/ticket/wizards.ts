@@ -1,7 +1,7 @@
 import { ConversationSpec } from "../../core/module";
 import { MyContext, MyConversation, MyConversationContext } from "../../types/context";
 import { askText, esc } from "../../core/wizard";
-import { Ticket } from "../../types/database";
+import { createTicketRow } from "./repo";
 import { openUserTopic } from "./topics";
 import { buildOwnerNotificationKeyboard } from "./keyboards";
 import { translatorFor } from "../../utils/i18n";
@@ -30,16 +30,12 @@ async function createTicket(
   const userId = ctx.from?.id;
   if (!userId) return null;
 
-  const row = await ctx.env.DB.prepare(
-    "INSERT INTO tickets (user_id, subject, status) VALUES (?, ?, 'pending_admin') RETURNING id",
-  )
-    .bind(userId, subject)
-    .first<{ id: number }>();
+  const ticketId = await createTicketRow(ctx.env.DB, userId, subject);
 
-  if (!row) return null;
+  if (ticketId === null) return null;
 
-  const ticket: Ticket = {
-    id: row.id,
+  const threadId = await openUserTopic(ctx, {
+    id: ticketId,
     user_id: userId,
     subject,
     status: "pending_admin",
@@ -47,9 +43,7 @@ async function createTicket(
     owner_topic_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-  };
-
-  const threadId = await openUserTopic(ctx, ticket);
+  });
 
   // Notify the owner — in the *owner's* language, since this lands in their chat.
   const ownerId = Number(ctx.env.OWNER);
@@ -59,13 +53,13 @@ async function createTicket(
       await ctx.api.sendMessage(
         ownerId,
         _o("ticket.owner_new_ticket", {
-          id: ticket.id,
+          id: ticketId,
           userId,
           name: esc(ctx.from?.first_name || _o("common.user")),
           subject: esc(subject),
         }),
         {
-          reply_markup: buildOwnerNotificationKeyboard(_o, ticket.id),
+          reply_markup: buildOwnerNotificationKeyboard(_o, ticketId),
           parse_mode: "HTML",
         },
       );
@@ -75,7 +69,7 @@ async function createTicket(
     }
   }
 
-  return { id: ticket.id, topicOpened: threadId !== null };
+  return { id: ticketId, topicOpened: threadId !== null };
 }
 
 /**

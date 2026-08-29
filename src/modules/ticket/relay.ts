@@ -1,10 +1,15 @@
 import { Composer } from "grammy";
 import { Message } from "grammy/types";
 import { MyContext } from "../../types/context";
-import { Ticket } from "../../types/database";
 import { openUserTopic } from "./topics";
 import { buildOwnerNotificationKeyboard } from "./keyboards";
-import { describeForReader, describeMessage, recordMessage } from "./messages";
+import { describeForReader, describeMessage } from "./messages";
+import {
+  findTicketByOwnerTopic,
+  findTicketByUserTopic,
+  recordTicketMessage,
+  setTicketStatus,
+} from "./repo";
 import { esc } from "../../core/wizard";
 import { translatorFor } from "../../utils/i18n";
 
@@ -45,11 +50,7 @@ ticketRelay.on("message", async (ctx, next) => {
   // Scenario A: Message from OWNER inside an active ticket topic
   // -------------------------------------------------------------
   if (Number.isFinite(ownerId) && senderId === ownerId) {
-    const ticket = await ctx.env.DB.prepare(
-        "SELECT * FROM tickets WHERE owner_topic_id = ? AND status != 'closed'"
-    )
-        .bind(threadId)
-        .first<Ticket>();
+    const ticket = await findTicketByOwnerTopic(ctx.env.DB, threadId);
 
     if (!ticket) return unlinkedTopic(ctx, threadId, next);
 
@@ -75,7 +76,7 @@ ticketRelay.on("message", async (ctx, next) => {
       }
     }
 
-    const recorded = await recordMessage(ctx.env.DB, {
+    const recorded = await recordTicketMessage(ctx.env.DB, {
       ticketId: ticket.id,
       senderId,
       senderRole: "owner",
@@ -104,9 +105,7 @@ ticketRelay.on("message", async (ctx, next) => {
       if (recorded === null) return;
     }
 
-    await ctx.env.DB.prepare("UPDATE tickets SET status = 'pending_user', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-        .bind(ticket.id)
-        .run();
+    await setTicketStatus(ctx.env.DB, ticket.id, "pending_user");
 
     return;
   }
@@ -114,11 +113,7 @@ ticketRelay.on("message", async (ctx, next) => {
   // -------------------------------------------------------------
   // Scenario B: Message from USER inside their ticket topic
   // -------------------------------------------------------------
-  const ticket = await ctx.env.DB.prepare(
-      "SELECT * FROM tickets WHERE user_topic_id = ? AND user_id = ? AND status != 'closed'"
-  )
-      .bind(threadId, senderId)
-      .first<Ticket>();
+  const ticket = await findTicketByUserTopic(ctx.env.DB, threadId, senderId);
 
   if (!ticket) return unlinkedTopic(ctx, threadId, next);
 
@@ -139,7 +134,7 @@ ticketRelay.on("message", async (ctx, next) => {
 
   // Recorded either way — this is the row the old code never wrote when the owner's
   // topic was minimized, which is why the owner's alert pointed at nothing.
-  const recorded = await recordMessage(ctx.env.DB, {
+  const recorded = await recordTicketMessage(ctx.env.DB, {
     ticketId: ticket.id,
     senderId,
     senderRole: "user",
@@ -176,9 +171,7 @@ ticketRelay.on("message", async (ctx, next) => {
     );
   }
 
-  await ctx.env.DB.prepare("UPDATE tickets SET status = 'pending_admin', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .bind(ticket.id)
-      .run();
+  await setTicketStatus(ctx.env.DB, ticket.id, "pending_admin");
 });
 
 /**

@@ -5,7 +5,8 @@ import { BotModule } from "../../core/module";
 import { Ticket, TicketStatus } from "../../types/database";
 import { openUserTopic, openOwnerTopic, minimizeTopic, closeTicket } from "./topics";
 import { buildActiveTicketMenu, buildMessageStyleKeyboard } from "./keyboards";
-import { setSimpleMessages } from "./messages";
+import { findActiveTicketForUser, findTicketById } from "./repo";
+import { getMessageStyle, setMessageStyle } from "../../core/db/repositories/users";
 import { ensureUser } from "../start/utils";
 import { ticketRelay } from "./relay";
 import { TICKET_SUBJECT_CONVERSATION, ticketSubjectConversation } from "./wizards";
@@ -44,10 +45,10 @@ async function applyMessageStyle(ctx: MyContext, simple: boolean): Promise<void>
   if (!userId) return;
 
   // The row is what remembers the choice, and someone can reach `/simple` without ever
-  // having reached `/start`. Without this the UPDATE below would match nothing and the
+  // having reached `/start`. Without this the write below would match nothing and the
   // confirmation would promise a setting that was never stored.
   await ensureUser(ctx);
-  await setSimpleMessages(ctx.env.DB, userId, simple);
+  await setMessageStyle(ctx.env.DB, userId, simple);
 
   // Sent back into the topic it was triggered from. Passed explicitly rather than left
   // to `ctx.reply` to infer, so the confirmation lands beside the messages it is about
@@ -78,13 +79,11 @@ messageStyle.command("simple", async (ctx) => {
   const userId = ctx.from?.id;
   if (!userId) return;
 
-  const row = await ctx.env.DB.prepare("SELECT simple_messages_at FROM users WHERE id = ?")
-      .bind(userId)
-      .first<{ simple_messages_at: string | null }>();
+  const style = await getMessageStyle(ctx.env.DB, userId);
 
   // No row yet means no preference stored, which is the same starting point as a stored
   // NULL: turn simple mode on.
-  await applyMessageStyle(ctx, !row || row.simple_messages_at === null);
+  await applyMessageStyle(ctx, !style.simple);
 });
 
 const ticketComposer = new Composer<MyContext>();
@@ -105,11 +104,7 @@ ticketComposer.callbackQuery("user_support", async (ctx) => {
   if (!userId) return;
 
   // Check if user already has an active ticket
-  const activeTicket = await ctx.env.DB.prepare(
-      "SELECT * FROM tickets WHERE user_id = ? AND status != 'closed' ORDER BY id DESC LIMIT 1"
-  )
-      .bind(userId)
-      .first<Ticket>();
+  const activeTicket = await findActiveTicketForUser(ctx.env.DB, userId);
 
   if (activeTicket) {
     await ctx.editMessageText(
@@ -135,7 +130,7 @@ ticketComposer.callbackQuery("user_support", async (ctx) => {
 ticketComposer.callbackQuery(/^t_open_u:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   const ticketId = parseInt(ctx.match[1], 10);
-  const ticket = await ctx.env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(ticketId).first<Ticket>();
+  const ticket = await findTicketById(ctx.env.DB, ticketId);
 
   if (!ticket) {
     await ctx.reply(ctx._("ticket.gone"));
@@ -161,7 +156,7 @@ ticketComposer.callbackQuery(/^t_min_u:(\d+)$/, async (ctx) => {
 ticketComposer.callbackQuery(/^t_open_o:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   const ticketId = parseInt(ctx.match[1], 10);
-  const ticket = await ctx.env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(ticketId).first<Ticket>();
+  const ticket = await findTicketById(ctx.env.DB, ticketId);
 
   if (!ticket) {
     await ctx.reply(ctx._("ticket.gone"));

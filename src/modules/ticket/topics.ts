@@ -2,6 +2,7 @@ import { MyContext } from "../../types/context";
 import { Ticket } from "../../types/database";
 import { buildUserTopicControls, buildOwnerTopicControls } from "./keyboards";
 import { sendThreadContext } from "./messages";
+import { closeTicketRow, findTicketById, setTicketOwnerTopic, setTicketUserTopic } from "./repo";
 import { esc } from "../../core/wizard";
 import { translatorFor } from "../../utils/i18n";
 
@@ -102,9 +103,7 @@ export async function openUserTopic(ctx: MyContext, ticket: Ticket): Promise<num
         const topic = await ctx.api.createForumTopic(userId, topicTitle);
         const threadId = topic.message_thread_id;
 
-        await ctx.env.DB.prepare("UPDATE tickets SET user_topic_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-            .bind(threadId, ticket.id)
-            .run();
+        await setTicketUserTopic(ctx.env.DB, ticket.id, threadId);
 
         await ctx.api.sendMessage(userId, header, {
             message_thread_id: threadId,
@@ -173,9 +172,7 @@ export async function openOwnerTopic(ctx: MyContext, ticket: Ticket): Promise<nu
         const topic = await ctx.api.createForumTopic(ownerId, topicTitle);
         const threadId = topic.message_thread_id;
 
-        await ctx.env.DB.prepare("UPDATE tickets SET owner_topic_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-            .bind(threadId, ticket.id)
-            .run();
+        await setTicketOwnerTopic(ctx.env.DB, ticket.id, threadId);
 
         await ctx.api.sendMessage(ownerId, header, {
             message_thread_id: threadId,
@@ -202,9 +199,7 @@ export async function openOwnerTopic(ctx: MyContext, ticket: Ticket): Promise<nu
  * unaffected and is not told.
  */
 export async function minimizeTopic(ctx: MyContext, ticketId: number, isOwner: boolean): Promise<void> {
-    const ticket = await ctx.env.DB.prepare("SELECT * FROM tickets WHERE id = ?")
-        .bind(ticketId)
-        .first<Ticket>();
+    const ticket = await findTicketById(ctx.env.DB, ticketId);
 
     if (!ticket) return;
 
@@ -217,7 +212,7 @@ export async function minimizeTopic(ctx: MyContext, ticketId: number, isOwner: b
         if (ticket.owner_topic_id) {
             await safeDeleteTopic(ctx, ownerId, ticket.owner_topic_id);
         }
-        await ctx.env.DB.prepare("UPDATE tickets SET owner_topic_id = NULL WHERE id = ?").bind(ticketId).run();
+        await setTicketOwnerTopic(ctx.env.DB, ticketId, null);
 
         const _o = await translatorFor(ctx.env.DB, ownerId);
         await ctx.api.sendMessage(ownerId, _o("ticket.owner_minimized", { id: ticketId }), {
@@ -227,7 +222,7 @@ export async function minimizeTopic(ctx: MyContext, ticketId: number, isOwner: b
         if (ticket.user_topic_id) {
             await safeDeleteTopic(ctx, ticket.user_id, ticket.user_topic_id);
         }
-        await ctx.env.DB.prepare("UPDATE tickets SET user_topic_id = NULL WHERE id = ?").bind(ticketId).run();
+        await setTicketUserTopic(ctx.env.DB, ticketId, null);
 
         const _u = await translatorFor(ctx.env.DB, ticket.user_id);
         await ctx.api.sendMessage(ticket.user_id, _u("ticket.user_minimized"), {
@@ -240,9 +235,7 @@ export async function minimizeTopic(ctx: MyContext, ticketId: number, isOwner: b
  * Closes a ticket for both peers and destroys both topics.
  */
 export async function closeTicket(ctx: MyContext, ticketId: number): Promise<void> {
-    const ticket = await ctx.env.DB.prepare("SELECT * FROM tickets WHERE id = ?")
-        .bind(ticketId)
-        .first<Ticket>();
+    const ticket = await findTicketById(ctx.env.DB, ticketId);
 
     if (!ticket || ticket.status === "closed") return;
 
@@ -257,14 +250,8 @@ export async function closeTicket(ctx: MyContext, ticketId: number): Promise<voi
         await safeDeleteTopic(ctx, ownerId, ticket.owner_topic_id);
     }
 
-    // Update status in D1
-    await ctx.env.DB.prepare(`
-    UPDATE tickets
-    SET status = 'closed', user_topic_id = NULL, owner_topic_id = NULL, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `)
-        .bind(ticketId)
-        .run();
+    // Update status in D1 (both topic ids are detached by the same write)
+    await closeTicketRow(ctx.env.DB, ticketId);
 
     // Notify both peers, each in their own language.
     try {

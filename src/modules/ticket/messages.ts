@@ -9,7 +9,9 @@ import {
   TicketMessageSender,
 } from "../../types/database";
 import { esc } from "../../core/wizard";
-import { sqlDateTime, unixSeconds } from "../../utils/date";
+import { unixSeconds } from "../../utils/date";
+import { getMessageStyle, MessageStyle, stampStyleHint } from "../../core/db/repositories/users";
+import { markMessageDelivered, pendingMessagesFor, recentDeliveredMessages } from "./repo";
 import { buildMessageStyleKeyboard } from "./keyboards";
 
 /**
@@ -120,19 +122,8 @@ export function describeForReader(
   return preview ? `${label} — ${esc(preview)}` : label;
 }
 
-/** Arguments for one ledger row. `delivered` is false when the recipient has no thread. */
-export interface RecordMessageInput {
-  ticketId: number;
-  senderId: number;
-  senderRole: TicketMessageSender;
-  /** Message id in the user's chat — the source when the user is the sender. */
-  userMsgId: number | null;
-  /** Message id in the owner's chat — the source when the owner is the sender. */
-  ownerMsgId: number | null;
-  contentType: TicketMessageContentType;
-  preview: string | null;
-  delivered: boolean;
-}
+// Arguments for one ledger row: see `repo.ts#RecordMessageInput` — the ledger's
+// writes live in the module's data layer, this file only renders what it returns.
 
 /**
  * Writes one message to the ledger.
@@ -141,37 +132,8 @@ export interface RecordMessageInput {
  * means: for a message that could not be delivered either, it is an actual loss and the
  * sender has to be told — the one case where silence would be worse than an error.
  */
-export async function recordMessage(
-  db: D1Database,
-  input: RecordMessageInput,
-): Promise<number | null> {
-  try {
-    const row = await db
-      .prepare(
-        `INSERT INTO ticket_messages
-           (ticket_id, sender_id, sender_role, user_msg_id, owner_msg_id,
-            content_type, preview, delivered_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         RETURNING id`,
-      )
-      .bind(
-        input.ticketId,
-        input.senderId,
-        input.senderRole,
-        input.userMsgId,
-        input.ownerMsgId,
-        input.contentType,
-        input.preview,
-        input.delivered ? sqlDateTime() : null,
-      )
-      .first<{ id: number }>();
-
-    return row?.id ?? null;
-  } catch (err) {
-    console.error(`ticket ${input.ticketId}: could not record message`, err);
-    return null;
-  }
-}
+// The ledger's writes (record, pending, digest, delivered marks) live in this
+// module's data layer — `repo.ts` — and are imported at the top of this file.
 
 /**
  * Messages still owed to one side, oldest first.
@@ -181,47 +143,6 @@ export async function recordMessage(
  * fetched deliberately: it is how the caller knows to say "and N more" without a second
  * COUNT query.
  */
-export async function pendingFor(
-  db: D1Database,
-  ticketId: number,
-  recipient: TicketMessageSender,
-): Promise<TicketMessage[]> {
-  const sender: TicketMessageSender = recipient === "owner" ? "user" : "owner";
-
-  const result = await db
-    .prepare(
-      `SELECT * FROM ticket_messages
-       WHERE ticket_id = ? AND sender_role = ? AND delivered_at IS NULL
-       ORDER BY id
-       LIMIT ?`,
-    )
-    .bind(ticketId, sender, MAX_FLUSH + 1)
-    .all<TicketMessage>();
-
-  return result.results ?? [];
-}
-
-/** The most recent already-delivered messages, oldest first, for the context digest. */
-export async function recentDelivered(
-  db: D1Database,
-  ticketId: number,
-): Promise<TicketMessage[]> {
-  // Newest-first with a LIMIT, then reversed in memory: ordering ascending instead would
-  // need the total row count first to know what to skip — a second query for a result
-  // that is at most eight rows long.
-  const result = await db
-    .prepare(
-      `SELECT * FROM ticket_messages
-       WHERE ticket_id = ? AND delivered_at IS NOT NULL
-       ORDER BY id DESC
-       LIMIT ?`,
-    )
-    .bind(ticketId, DIGEST_LIMIT)
-    .all<TicketMessage>();
-
-  return (result.results ?? []).reverse();
-}
-
 /**
  * One ledger row as blocks: a "who · when" line, then the message body.
  *
@@ -399,48 +320,6 @@ async function sendRich(
   });
 }
 
-/** What one reader has decided about rich formatting, and whether they were ever asked. */
-type MessageStyle = { simple: boolean; hinted: boolean };
-
-/**
- * Reads a reader's formatting preference.
- *
- * `hinted: true` for a user with no row at all, which looks backwards but is the safe
- * default: the hint is suppressed rather than offered. A missing row means
- * `markStyleHintSent` would update nothing, so the "once per account" promise could
- * never be kept and the notice would reappear on every single topic open.
- */
-async function readMessageStyle(db: D1Database, userId: number): Promise<MessageStyle> {
-  try {
-    const row = await db
-      .prepare("SELECT simple_messages_at, style_hint_at FROM users WHERE id = ?")
-      .bind(userId)
-      .first<{ simple_messages_at: string | null; style_hint_at: string | null }>();
-
-    if (!row) return { simple: false, hinted: true };
-
-    return { simple: row.simple_messages_at !== null, hinted: row.style_hint_at !== null };
-  } catch (err) {
-    // Rich is the better guess when the preference is unreadable: it is what the vast
-    // majority of clients render correctly, and `hinted: true` keeps a database blip
-    // from spending the one-time notice.
-    console.error(`could not read message style for ${userId}:`, err);
-    return { simple: false, hinted: true };
-  }
-}
-
-/** Records the reader's choice. `null` restores rich formatting. */
-export async function setSimpleMessages(
-  db: D1Database,
-  userId: number,
-  simple: boolean,
-): Promise<void> {
-  await db
-    .prepare("UPDATE users SET simple_messages_at = ? WHERE id = ?")
-    .bind(simple ? sqlDateTime() : null, userId)
-    .run();
-}
-
 /**
  * Offers the escape hatch once, as a plain message, then never again.
  *
@@ -459,9 +338,7 @@ async function offerStyleHint(
   reader: Translator,
 ): Promise<void> {
   try {
-    await ctx.env.DB.prepare("UPDATE users SET style_hint_at = ? WHERE id = ?")
-      .bind(sqlDateTime(), chatId)
-      .run();
+    await stampStyleHint(ctx.env.DB, chatId);
 
     await ctx.api.sendMessage(chatId, reader("ticket.style_hint"), {
       message_thread_id: threadId,
@@ -495,7 +372,7 @@ export async function flushPending(
   reader: Translator,
   simple: boolean,
 ): Promise<void> {
-  const owed = await pendingFor(ctx.env.DB, ticket.id, recipient);
+  const owed = await pendingMessagesFor(ctx.env.DB, ticket.id, recipient, MAX_FLUSH + 1);
   if (owed.length === 0) return;
 
   const batch = owed.slice(0, MAX_FLUSH);
@@ -549,7 +426,7 @@ export async function flushPending(
       }
     }
 
-    await markDelivered(ctx.env.DB, row.id, recipient, copiedId);
+    await markMessageDelivered(ctx.env.DB, row.id, recipient, copiedId);
   }
 
   // Never truncate silently. A recipient who is told "12 earlier messages are still
@@ -568,38 +445,6 @@ export async function flushPending(
       notes.map(esc).join("\n"),
       simple,
     );
-  }
-}
-
-/**
- * Stamps a message delivered, recording the recipient-side message id when there is one.
- *
- * The column written depends on who received it, which is why this is not one generic
- * UPDATE: `user_msg_id` and `owner_msg_id` are ids in two different chats, and putting
- * one in the other's column would leave a row pointing at an unrelated message.
- */
-async function markDelivered(
-  db: D1Database,
-  messageId: number,
-  recipient: TicketMessageSender,
-  copiedMsgId: number | null,
-): Promise<void> {
-  const column = recipient === "owner" ? "owner_msg_id" : "user_msg_id";
-
-  try {
-    await db
-      .prepare(
-        `UPDATE ticket_messages
-         SET delivered_at = ?, ${column} = COALESCE(?, ${column})
-         WHERE id = ? AND delivered_at IS NULL`,
-      )
-      .bind(sqlDateTime(), copiedMsgId, messageId)
-      .run();
-  } catch (err) {
-    // Leaving the row pending is the safe failure: it gets offered again on the next
-    // reopen, which is a duplicate at worst. Swallowing it here keeps one bad row from
-    // aborting the rest of the flush.
-    console.error(`ticket message ${messageId}: could not mark delivered`, err);
   }
 }
 
@@ -623,10 +468,10 @@ export async function sendThreadContext(
     // `recipientChatId` doubles as their `users.id`: a ticket's two sides are the customer
     // and the owner, and a private chat's id *is* the user's id. Topics live inside those
     // private chats, so there is no group id in play to confuse it with.
-    const style = await readMessageStyle(ctx.env.DB, recipientChatId);
+    const style = await getMessageStyle(ctx.env.DB, recipientChatId);
 
     if (opts.digest) {
-      const rows = await recentDelivered(ctx.env.DB, ticket.id);
+      const rows = await recentDeliveredMessages(ctx.env.DB, ticket.id, DIGEST_LIMIT);
       const blocks = renderDigestBlocks(reader, rows);
       const html = renderDigest(reader, rows);
 
