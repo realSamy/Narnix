@@ -2,6 +2,8 @@ import { ConversationSpec } from "../../../core/module";
 import { GrammyError } from "grammy";
 import { MyConversation, MyConversationContext } from "../../../types/context";
 import { askText, confirm, esc } from "../../../core/wizard";
+import { createBroadcast, hasLiveBroadcast } from "../../../core/db/repositories/broadcasts";
+import { countReachable } from "../../../core/db/repositories/users";
 
 export const BROADCAST_CONVERSATION = "admin_broadcast";
 
@@ -74,11 +76,7 @@ async function broadcastWizard(
   // A second live broadcast would interleave with the first: the drain job takes the
   // oldest live row, so the newer one would sit queued behind it for however long the
   // first takes — long enough that the author would reasonably assume it was lost.
-  const live = await conversation.external(() =>
-    ctx.env.DB.prepare(
-      "SELECT id FROM broadcasts WHERE status IN ('queued', 'running') LIMIT 1",
-    ).first<{ id: number }>(),
-  );
+  const live = await conversation.external(() => hasLiveBroadcast(ctx.env.DB));
 
   if (live) {
     await ctx.reply(ctx._("admin.broadcast.running"), { parse_mode: "HTML" });
@@ -91,13 +89,7 @@ async function broadcastWizard(
     return;
   }
 
-  const recipients = await conversation.external(async () => {
-    const row = await ctx.env.DB.prepare(
-      "SELECT COUNT(*) AS total FROM users WHERE blocked_at IS NULL",
-    ).first<{ total: number }>();
-
-    return row?.total ?? 0;
-  });
+  const recipients = await conversation.external(() => countReachable(ctx.env.DB));
 
   const confirmed = await confirm(
     conversation,
@@ -114,15 +106,11 @@ async function broadcastWizard(
 
   const jobId = await conversation.external(async () => {
     try {
-      const row = await ctx.env.DB.prepare(
-        `INSERT INTO broadcasts (message, parse_mode, created_by, status)
-         VALUES (?, 'HTML', ?, 'queued')
-         RETURNING id`,
-      )
-        .bind(body, authorId)
-        .first<{ id: number }>();
-
-      return row?.id ?? null;
+      return await createBroadcast(ctx.env.DB, {
+        message: body,
+        parseMode: "HTML",
+        createdBy: authorId,
+      });
     } catch (err) {
       console.error("broadcast: INSERT failed", err);
       return null;

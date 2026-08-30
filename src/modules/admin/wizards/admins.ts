@@ -2,6 +2,7 @@ import { Keyboard } from "grammy";
 import { ConversationSpec } from "../../../core/module";
 import { MyConversation, MyConversationContext } from "../../../types/context";
 import { askUsing, normalizeDigits } from "../../../core/wizard";
+import { addAdmin } from "../../../core/db/repositories/admins";
 
 export const ADMIN_ADD_CONVERSATION = "admin_add";
 
@@ -51,15 +52,9 @@ async function adminAddWizard(
     if (String(targetId) === ctx.env.OWNER) return "owner";
 
     try {
-      const res = await ctx.env.DB.prepare(
-        "INSERT INTO admins (user_id, added_by) VALUES (?, ?) ON CONFLICT DO NOTHING",
-      )
-        .bind(targetId, ctx.from?.id)
-        .run();
-
-      // `ON CONFLICT DO NOTHING` makes a re-add succeed with zero changed rows,
+      // `insertOrIgnore` makes a re-add succeed with zero changed rows,
       // which is the only way to tell "promoted" from "already an admin".
-      return res.meta.changes > 0 ? "added" : "already";
+      return await addAdmin(ctx.env.DB, targetId, ctx.from?.id ?? null);
     } catch (err) {
       console.error("admin_add: INSERT failed", err);
       return "failed";

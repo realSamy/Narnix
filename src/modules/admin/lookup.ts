@@ -5,6 +5,7 @@ import { esc } from "../../core/wizard";
 import { toman } from "../../utils/format";
 import { formatShamsiDate } from "../../utils/date";
 import { normalizeLanguage } from "../../utils/i18n";
+import { adjustBalance, findUserById } from "../../core/db/repositories/users";
 
 /**
  * The admin's view of one user: who they are, and one lever.
@@ -47,21 +48,7 @@ export async function loadUserRecord(
   db: D1Database,
   userId: number,
 ): Promise<UserRecord | null> {
-  return await db
-    .prepare(
-      `SELECT u.id,
-              u.first_name,
-              u.last_name,
-              u.username,
-              u.balance,
-              u.lang,
-              u.blocked_at,
-              u.created_at
-         FROM users u
-        WHERE u.id = ?`,
-    )
-    .bind(userId)
-    .first<UserRecord>();
+  return await findUserById(db, userId);
 }
 
 /** The user card, rendered. Pure, so a wizard can call it after an adjustment. */
@@ -120,15 +107,13 @@ export type AdjustOutcome =
 /**
  * Moves a user's balance by `delta` and records why.
  *
- * The guard is in the UPDATE itself (`balance + ? >= 0`), not in a preceding SELECT:
- * between a read and a write the user can spend, and a debit checked against a stale
- * balance would drive the account negative. `meta.changes` distinguishes "did not match"
- * from "no such user", which is why the row is re-read on failure rather than assumed.
- *
- * The `note` currently only reaches the console. If your bot grows a ledger table, write
- * the audit row here — *after* the balance moves, and with its own try/catch that only
- * logs. The money has already moved by that point, and failing the whole operation
- * because the audit insert failed would be strictly worse than an audit gap.
+ * The write itself lives in the users repository (`adjustBalance`), which owns
+ * the guarded UPDATE; what remains here is the admin-facing part — wording the
+ * outcome, and the audit note. The `note` currently only reaches the console.
+ * If your bot grows a ledger table, write the audit row here — *after* the
+ * balance moves, and with its own try/catch that only logs. The money has
+ * already moved by that point, and failing the whole operation because the
+ * audit insert failed would be strictly worse than an audit gap.
  */
 export async function adjustUserBalance(
   db: D1Database,
@@ -137,33 +122,16 @@ export async function adjustUserBalance(
   adminId: number,
   note: string,
 ): Promise<AdjustOutcome> {
-  let res;
-  try {
-    res = await db
-      .prepare("UPDATE users SET balance = balance + ? WHERE id = ? AND balance + ? >= 0")
-      .bind(delta, userId, delta)
-      .run();
-  } catch (err) {
-    console.error("admin adjust: UPDATE failed", err);
-    return { kind: "failed" };
+  const result = await adjustBalance(db, userId, delta);
+
+  if (result.ok) {
+    console.log(`admin adjust: user ${userId} delta ${delta} by admin ${adminId} — ${note}`);
+    return { kind: "ok", balance: result.balance };
   }
 
-  if (!res.success || res.meta.changes === 0) {
-    const current = await db
-      .prepare("SELECT balance FROM users WHERE id = ?")
-      .bind(userId)
-      .first<{ balance: number }>();
-
-    if (!current) return { kind: "gone" };
-    return { kind: "insufficient", balance: current.balance };
+  if (result.reason === "insufficient") {
+    return { kind: "insufficient", balance: result.balance };
   }
 
-  const after = await db
-    .prepare("SELECT balance FROM users WHERE id = ?")
-    .bind(userId)
-    .first<{ balance: number }>();
-
-  console.log(`admin adjust: user ${userId} delta ${delta} by admin ${adminId} — ${note}`);
-
-  return { kind: "ok", balance: after?.balance ?? 0 };
+  return result.reason === "failed" ? { kind: "failed" } : { kind: "gone" };
 }

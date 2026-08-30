@@ -1,5 +1,10 @@
 import {MyContext} from "../../types/context";
 import {InlineKeyboard} from "grammy";
+import {
+  hasAdminRow,
+  listAdminIds,
+  removeAdmin as removeAdminRow,
+} from "../../core/db/repositories/admins";
 
 export async function loadAdminUsers(ctx: MyContext) {
   const adminIds = await getAdminIds(ctx);
@@ -46,12 +51,12 @@ export async function showAdminDashboard(ctx: MyContext) {
     await ctx.answerCallbackQuery();
     await ctx.editMessageText(text, {
       reply_markup: keyboard,
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
     });
   } else {
     await ctx.reply(text, {
       reply_markup: keyboard,
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
     });
   }
 }
@@ -68,25 +73,14 @@ export async function isAdmin(ctx: MyContext): Promise<boolean> {
     return true;
   }
 
-  // Query D1 database for admin record
-  const admin = await ctx.env.DB.prepare(
-    "SELECT user_id FROM admins WHERE user_id = ?"
-  )
-    .bind(userId)
-    .first();
-
-  return !!admin;
+  return hasAdminRow(ctx.env.DB, userId);
 }
 
 /**
  * Fetches all admin User IDs from D1 (including Bot Owner)
  */
 export async function getAdminIds(ctx: MyContext): Promise<string[]> {
-  const { results } = await ctx.env.DB.prepare(
-    "SELECT user_id FROM admins"
-  ).all();
-
-  const adminIds = results.map((row: any) => row.user_id.toString());
+  const adminIds = (await listAdminIds(ctx.env.DB)).map((id) => id.toString());
 
   // Ensure Owner ID is included
   if (ctx.env.OWNER && !adminIds.includes(ctx.env.OWNER)) {
@@ -101,10 +95,7 @@ export async function getAdminIds(ctx: MyContext): Promise<string[]> {
  */
 export async function removeAdmin(ctx: MyContext, targetUserId: number): Promise<boolean> {
   try {
-    await ctx.env.DB.prepare("DELETE FROM admins WHERE user_id = ?")
-      .bind(targetUserId)
-      .run();
-    return true;
+    return await removeAdminRow(ctx.env.DB, targetUserId);
   } catch (err) {
     console.error("Failed to remove admin:", err);
     return false;
