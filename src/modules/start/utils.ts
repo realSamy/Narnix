@@ -1,10 +1,14 @@
 import { InlineKeyboard } from "grammy";
 import { MyContext } from "../../types/context";
-import { User } from "../../types/database";
 import { esc } from "../../core/wizard";
 import { toman } from "../../utils/format";
 import { translatorFor, normalizeLanguage } from "../../utils/i18n";
-import { creditBalance } from "../../utils/balance";
+import {
+  creditBalance,
+  ensureUser as ensureUserRecord,
+  findUserById,
+  redeemReferral,
+} from "../../core/db/repositories/users";
 
 /** Credit granted to the inviter the first time a referral link is redeemed. */
 export const REFERRAL_BONUS = 20000;
@@ -28,29 +32,15 @@ export async function ensureUser(ctx: MyContext): Promise<void> {
   const from = ctx.from;
   if (!from) return;
 
-  try {
-    const lang = ctx.session.lang ?? normalizeLanguage(from.language_code);
+  const lang = ctx.session.lang ?? normalizeLanguage(from.language_code);
 
-    await ctx.env.DB.prepare(`
-      INSERT INTO users (id, first_name, last_name, username, lang)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        first_name = excluded.first_name,
-        last_name = excluded.last_name,
-        username = excluded.username,
-        blocked_at = NULL
-    `)
-        .bind(
-            from.id,
-            from.first_name,
-            from.last_name || null,
-            from.username || null,
-            lang
-        )
-        .run();
-  } catch (err) {
-    console.error("❌ Failed to ensure user in D1 database:", err);
-  }
+  await ensureUserRecord(ctx.env.DB, {
+    id: from.id,
+    firstName: from.first_name,
+    lastName: from.last_name || null,
+    username: from.username || null,
+    lang,
+  });
 }
 
 /**
@@ -77,11 +67,7 @@ export async function processReferral(ctx: MyContext): Promise<void> {
 
   try {
     // 1. Verify inviter exists in database
-    const inviter = await ctx.env.DB.prepare(
-        "SELECT id, first_name FROM users WHERE id = ?"
-    )
-        .bind(inviterId)
-        .first<User>();
+    const inviter = await findUserById(ctx.env.DB, inviterId);
 
     if (!inviter) {
       await ctx.reply(ctx._("messages.referral_not_exists"));
@@ -89,16 +75,10 @@ export async function processReferral(ctx: MyContext): Promise<void> {
     }
 
     // 2. Atomically set referral ONLY IF the user doesn't already have one
-    const updateRes = await ctx.env.DB.prepare(`
-      UPDATE users 
-      SET referral = ? 
-      WHERE id = ? AND referral IS NULL
-    `)
-        .bind(inviterId, newUserId)
-        .run();
+    const linked = await redeemReferral(ctx.env.DB, newUserId, inviterId);
 
     // 3. If successfully linked for the first time, credit and notify the inviter
-    if (updateRes.meta.changes > 0) {
+    if (linked) {
       // The credit is its own statement outside the notification try/catch. It used
       // to share one, whose catch was commented "inviter may have blocked the bot;
       // ignore safely" — so a D1 failure on the *credit* was swallowed by a handler
