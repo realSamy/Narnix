@@ -2,6 +2,7 @@ import { BotError, GrammyError, HttpError } from "grammy";
 import { MyContext } from "../types/context";
 import { getTranslator } from "../utils/i18n";
 import { isPermanentFailure } from "../jobs/reachability";
+import { stampBlocked } from "./db/repositories/users";
 
 /**
  * Telegram rejections that are races rather than faults.
@@ -46,17 +47,11 @@ function isBenign(err: unknown): boolean {
  * broadcast instead of waiting for the broadcast to rediscover it. `/start` clears
  * the stamp, so a user who comes back is not silenced permanently.
  */
-async function stampBlocked(ctx: MyContext): Promise<void> {
+async function markUnreachable(ctx: MyContext): Promise<void> {
   const userId = ctx.from?.id;
   if (!userId || !ctx.env?.DB) return;
 
-  try {
-    await ctx.env.DB.prepare("UPDATE users SET blocked_at = datetime('now') WHERE id = ?")
-      .bind(userId)
-      .run();
-  } catch (err) {
-    console.error(`errorHandler: could not stamp blocked_at for ${userId}`, err);
-  }
+  await stampBlocked(ctx.env.DB, userId);
 }
 
 /**
@@ -143,7 +138,7 @@ export default async function (err: BotError<MyContext>) {
   // A 403 (or "chat not found") means every further send to this user fails the
   // same way, so notifying them is pointless — record it and stop.
   if (isPermanentFailure(cause)) {
-    await stampBlocked(ctx);
+    await markUnreachable(ctx);
     return;
   }
 

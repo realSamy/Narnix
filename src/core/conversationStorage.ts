@@ -1,5 +1,10 @@
 import type { ConversationData, ConversationStorage } from "@grammyjs/conversations";
 import type { MyContext } from "../types/context";
+import {
+  deleteConversationState,
+  readConversationState,
+  writeConversationState,
+} from "./db/repositories/conversations";
 
 /**
  * Bump this whenever a conversation builder function changes in a way that
@@ -43,15 +48,12 @@ export function d1ConversationStorage(
     version: CONVERSATION_DATA_VERSION,
     adapter: {
       async read(key) {
-        const row = await db
-          .prepare("SELECT data FROM conversations WHERE key = ?")
-          .bind(key)
-          .first<{ data: string }>();
+        const data = await readConversationState(db, key);
 
-        if (!row) return undefined;
+        if (data === null) return undefined;
 
         try {
-          return JSON.parse(row.data);
+          return JSON.parse(data);
         } catch {
           // A row we cannot parse is unusable. Returning undefined makes the
           // plugin treat the chat as having no active conversation, which is the
@@ -62,19 +64,11 @@ export function d1ConversationStorage(
       },
 
       async write(key, state) {
-        await db
-          .prepare(
-            `INSERT INTO conversations (key, data, updated_at)
-             VALUES (?, ?, CURRENT_TIMESTAMP)
-             ON CONFLICT(key) DO UPDATE SET data       = excluded.data,
-                                            updated_at = CURRENT_TIMESTAMP`,
-          )
-          .bind(key, JSON.stringify(state))
-          .run();
+        await writeConversationState(db, key, JSON.stringify(state));
       },
 
       async delete(key) {
-        await db.prepare("DELETE FROM conversations WHERE key = ?").bind(key).run();
+        await deleteConversationState(db, key);
       },
     },
   };
