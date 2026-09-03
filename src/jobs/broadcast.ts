@@ -1,7 +1,14 @@
 import { Api } from "grammy";
 import { Env } from "../types";
+import { Broadcast } from "../types/database";
 import { translatorFor } from "../utils/i18n";
 import { isPermanentFailure } from "./reachability";
+import {
+  advanceBroadcast,
+  claimFinished,
+  findOldestLive,
+} from "../core/db/repositories/broadcasts";
+import { listReachableIdsAfter } from "../core/db/repositories/users";
 
 /**
  * The broadcast drain.
@@ -14,19 +21,12 @@ import { isPermanentFailure } from "./reachability";
  * A batch of 15 leaves generous headroom (the accounting below adds 3 more) and works
  * out to roughly 900 recipients an hour, which is also comfortably under Telegram's
  * ~30 messages/second bulk guidance.
+ *
+ * All queue mechanics — the live-status filter, the keyset cursor, the completion
+ * claim, the unreachable stamp — live in `core/db/repositories/broadcasts.ts`.
+ * This file is only the send loop and its error classification.
  */
 const BATCH_SIZE = 15;
-
-/** Broadcast row fields the drain needs. */
-interface BroadcastJob {
-  id: number;
-  message: string;
-  parse_mode: string | null;
-  created_by: number;
-  cursor_user_id: number;
-  sent_count: number;
-  failed_count: number;
-}
 
 /**
  * Advances the oldest live broadcast by one batch. A no-op when nothing is queued.
@@ -36,30 +36,16 @@ interface BroadcastJob {
  * lookup + 1 report send.
  */
 export async function drainBroadcast(env: Env): Promise<void> {
-  const job = await env.DB.prepare(
-    `SELECT id, message, parse_mode, created_by, cursor_user_id, sent_count, failed_count
-       FROM broadcasts
-      WHERE status IN ('queued', 'running')
-      ORDER BY id
-      LIMIT 1`,
-  ).first<BroadcastJob>();
+  const job = await findOldestLive(env.DB);
 
   if (!job) return;
 
   // Keyset, not OFFSET: each batch is an index seek on `idx_users_reachable` no matter
   // how far in the job is, and a user who signs up mid-broadcast is either past the
   // cursor (and gets the message) or behind it (and does not) — never served twice.
-  const { results: recipients } = await env.DB.prepare(
-    `SELECT id
-       FROM users
-      WHERE id > ? AND blocked_at IS NULL
-      ORDER BY id
-      LIMIT ?`,
-  )
-    .bind(job.cursor_user_id, BATCH_SIZE)
-    .all<{ id: number }>();
+  const recipients = await listReachableIdsAfter(env.DB, job.cursor_user_id, BATCH_SIZE);
 
-  if (!recipients || recipients.length === 0) {
+  if (recipients.length === 0) {
     await finishBroadcast(env, job);
     return;
   }
@@ -75,61 +61,32 @@ export async function drainBroadcast(env: Env): Promise<void> {
 
   for (const recipient of recipients) {
     try {
-      await api.sendMessage(recipient.id, job.message, {
+      await api.sendMessage(recipient, job.message, {
         parse_mode: parseMode,
         link_preview_options: { is_disabled: true },
       });
       sent++;
     } catch (err) {
       failed++;
-      if (isPermanentFailure(err)) unreachable.push(recipient.id);
-      else console.error(`broadcast ${job.id}: send to ${recipient.id} failed`, err);
+      if (isPermanentFailure(err)) unreachable.push(recipient);
+      else console.error(`broadcast ${job.id}: send to ${recipient} failed`, err);
     }
   }
 
-  // The cursor advances past failures too. Retrying them would be defensible, but a
-  // user whose send fails every time would otherwise hold the cursor still and block
-  // the queue for every remaining recipient, forever.
-  const lastId = recipients[recipients.length - 1].id;
-
-  const statements = [
-    env.DB.prepare(
-      `UPDATE broadcasts
-          SET status         = 'running',
-              cursor_user_id = ?,
-              sent_count     = sent_count + ?,
-              failed_count   = failed_count + ?
-        WHERE id = ?`,
-    ).bind(lastId, sent, failed, job.id),
-  ];
-
-  if (unreachable.length > 0) {
-    const holes = unreachable.map(() => "?").join(", ");
-    statements.push(
-      env.DB.prepare(
-        `UPDATE users SET blocked_at = datetime('now') WHERE id IN (${holes})`,
-      ).bind(...unreachable),
-    );
-  }
-
-  // One subrequest for both statements.
-  await env.DB.batch(statements);
+  await advanceBroadcast(env.DB, {
+    jobId: job.id,
+    cursorUserId: recipients[recipients.length - 1],
+    sent,
+    failed,
+    unreachableIds: unreachable,
+  });
 }
 
 /** Closes the job out and reports the tally to whoever started it. */
-async function finishBroadcast(env: Env, job: BroadcastJob): Promise<void> {
-  const closed = await env.DB.prepare(
-    `UPDATE broadcasts
-        SET status = 'done', finished_at = datetime('now')
-      WHERE id = ? AND status IN ('queued', 'running')`,
-  )
-    .bind(job.id)
-    .run();
-
-  // Two cron invocations can overlap on a slow batch. Claiming the row by predicate
-  // means only one of them sends the report; D1 returns `success: true` either way, so
-  // `meta.changes` is the test.
-  if (!closed.success || closed.meta.changes === 0) return;
+async function finishBroadcast(env: Env, job: Broadcast): Promise<void> {
+  // The predicate claim decides which of two overlapping cron invocations
+  // gets to report; the loser returns here.
+  if (!(await claimFinished(env.DB, job.id))) return;
 
   try {
     const _ = await translatorFor(env.DB, job.created_by);
