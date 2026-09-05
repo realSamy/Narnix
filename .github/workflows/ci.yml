@@ -1,9 +1,11 @@
-# The three gates this project actually has: typecheck, the locale audit, and the wizard
-# smoke harness. Deliberately one job — they share an install and a migrated local
-# database, and splitting them would triple the setup cost to save nothing.
+# The gates this project actually has: typecheck, the locale audit, the layer audit,
+# the unit tests, and the wizard smoke harness. Deliberately one job — they share an
+# install and a migrated local database, and splitting them would triple the setup
+# cost to save nothing.
 #
-# `pnpm test` is NOT run here. It is a vitest entry point and this template ships no
-# test files; tests are out of scope for the project.
+# The unit tests exercise query *construction* against a recording D1 stub
+# (`src/core/db/model.test.ts`); the smoke harness is what runs against a real
+# local D1, so both are needed and neither covers the other.
 name: CI
 
 on:
@@ -44,7 +46,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # `smoke.wizards.ts` drives the real bot against the local D1 in
+      # `scripts/smoke.wizards.ts` drives the real bot against the local D1 in
       # `.wrangler/state`, so the schema has to exist before it runs — an unmigrated
       # database fails with "no such table". `--local` touches only the miniflare
       # sqlite file, so this needs no Cloudflare credentials.
@@ -56,6 +58,14 @@ jobs:
 
       - name: Locale audit
         run: pnpm check:i18n
+
+      # Fails if SQL is prepared anywhere outside the data layer — the boundary
+      # the repositories exist to hold.
+      - name: Layer audit
+        run: pnpm check:layer
+
+      - name: Unit tests
+        run: pnpm test
 
       # Left last: it is the slowest gate and the one whose failures are most often
       # explained by the two above.
