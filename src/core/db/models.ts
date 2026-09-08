@@ -105,6 +105,7 @@ export const Broadcasts = defineModel<Broadcast>({
     failed_count: 1,
     created_at: 1,
     finished_at: 1,
+    lease_until: 1,
   },
 });
 

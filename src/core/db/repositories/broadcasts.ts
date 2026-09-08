@@ -62,6 +62,33 @@ export async function createBroadcast(
 }
 
 /**
+ * Claims the right to drain one job's next batch.
+ *
+ * Two cron invocations can overlap — a slow batch, a platform retry — and
+ * without a claim both would SELECT the same job and cursor page and deliver
+ * the whole batch twice. The claim is a conditional UPDATE: it succeeds only if
+ * the job is live *and* unclaimed (or its lease has expired), so exactly one
+ * invocation's `meta.changes` is 1. The lease is just under the cron interval:
+ * a claim lost to a crashed invocation costs one minute of queue idleness,
+ * while an unbounded claim would stall the queue on the first crash.
+ */
+export async function claimBatch(db: D1Database, jobId: number): Promise<boolean> {
+  const claimed = await db
+    .prepare(
+      `UPDATE broadcasts
+          SET status     = 'running',
+              lease_until = datetime('now', '+55 seconds')
+        WHERE id = ?
+          AND status IN ('queued', 'running')
+          AND (lease_until IS NULL OR lease_until < datetime('now'))`,
+    )
+    .bind(jobId)
+    .run();
+
+  return claimed.success && claimed.meta.changes > 0;
+}
+
+/**
  * Advances one broadcast past the batch it just attempted.
  *
  * `unreachableIds` — users Telegram reported as permanently gone — are stamped

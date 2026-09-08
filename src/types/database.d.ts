@@ -133,6 +133,11 @@ export interface Broadcast {
   failed_count: number;
   created_at: string;
   finished_at: string | null;
+  /**
+   * While a drain invocation is working on this job, the instant its claim
+   * expires. NULL = unclaimed. See `claimBatch` in the broadcasts repository.
+   */
+  lease_until: string | null;
 }
 
 /**

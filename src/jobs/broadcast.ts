@@ -5,6 +5,7 @@ import { translatorFor } from "../utils/i18n";
 import { isPermanentFailure } from "./reachability";
 import {
   advanceBroadcast,
+  claimBatch,
   claimFinished,
   findOldestLive,
 } from "../core/db/repositories/broadcasts";
@@ -39,6 +40,10 @@ export async function drainBroadcast(env: Env): Promise<void> {
   const job = await findOldestLive(env.DB);
 
   if (!job) return;
+
+  // Claim before sending: the loser of a two-invocation overlap returns here
+  // instead of delivering the same batch twice.
+  if (!(await claimBatch(env.DB, job.id))) return;
 
   // Keyset, not OFFSET: each batch is an index seek on `idx_users_reachable` no matter
   // how far in the job is, and a user who signs up mid-broadcast is either past the
