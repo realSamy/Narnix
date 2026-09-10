@@ -1,0 +1,40 @@
+# Local development variables. Copy to `.dev.vars` and fill in real values.
+#
+#   cp .dev.vars.example .dev.vars
+#
+# `.dev.vars` is gitignored; this file is the committed template, so it must never
+# contain a real token or id. `wrangler dev` and `getPlatformProxy()` (used by
+# `src/poll.ts` for long polling) both read `.dev.vars` automatically.
+#
+# In production these are Worker secrets instead — `wrangler secret put <NAME>`. They
+# are deliberately absent from `wrangler.jsonc`; see the comment there.
+#
+# `src/core/env.ts` logs the names of any that are missing at startup.
+
+# --- Required ---
+
+# From @BotFather.
+BOT_TOKEN=123456789:AA-replace-me
+
+# Telegram user id of the bot owner: super-admin (always an admin regardless of the
+# `admins` table) and the human side of every support ticket. Numeric, as a string.
+OWNER=000000000
+
+# --- Optional: features degrade gracefully when unset ---
+
+# Channel users must join before the bot answers them, plus the link shown on the
+# "join first" screen. Leave both empty to disable the lock entirely.
+CHANNEL_LOCK=
+CHANNEL_LOCK_LINK=@YourChannel
+
+# Shared secret for the webhook: set it to the same value you pass as `secret_token`
+# on `setWebhook`, and grammY rejects every POST that does not carry the matching
+# `X-Telegram-Bot-Api-Secret-Token` header. Unset, the (public) URL is the only gate.
+# Generate one with `openssl rand -hex 32`.
+WEBHOOK_SECRET=
+
+# --- Local only ---
+
+# SOCKS proxy for reaching Telegram from a network that blocks it. Read only by
+# `src/poll.ts`; never set in production.
+LOCAL_PROXY=

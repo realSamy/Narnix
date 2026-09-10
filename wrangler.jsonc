@@ -45,6 +45,7 @@
   //              wrangler secret put OWNER
   //              wrangler secret put CHANNEL_LOCK
   //              wrangler secret put CHANNEL_LOCK_LINK
+  //              wrangler secret put WEBHOOK_SECRET
   //
   // A missing one does not fail silently: `assertEnv` in `src/core/env.ts` logs the
   // exact names at the top of every invocation that is missing them.

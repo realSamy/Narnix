@@ -21,6 +21,14 @@ export interface Env {
   OWNER: string;
 
   /**
+   * Optional shared secret for the webhook. When set, updates whose
+   * `X-Telegram-Bot-Api-Secret-Token` header does not match are rejected before any
+   * handler runs — strangers can no longer inject fake updates by POSTing to the
+   * (public) workers.dev URL. Set the same value as `secret_token` on `setWebhook`.
+   */
+  WEBHOOK_SECRET?: string;
+
+  /**
    * Optional SOCKS proxy URL, read only by `src/poll.ts` for local long-polling
    * development. Never set in production — the deployed Worker reaches Telegram
    * directly. Declared here because `getPlatformProxy()` surfaces `.dev.vars`

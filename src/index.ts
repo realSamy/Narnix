@@ -13,7 +13,14 @@ export default {
     assertEnv(env);
 
     const bot = createBot(env.BOT_TOKEN, env);
-    return webhookCallback(bot, "cloudflare-mod")(request);
+
+    // `secretToken` makes grammY reject every update whose
+    // `X-Telegram-Bot-Api-Secret-Token` header does not match, before any handler
+    // runs. Unset, the URL is the only thing protecting the endpoint — which is a
+    // deliberate, documented degradation, like the channel lock's fail-open.
+    return webhookCallback(bot, "cloudflare-mod", {
+      secretToken: env.WEBHOOK_SECRET || undefined,
+    })(request);
   },
 
   /**

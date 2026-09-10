@@ -25,7 +25,7 @@ const REQUIRED = ["BOT_TOKEN", "OWNER"] as const;
  * `channelLock.ts` already treats it that way. It is listed so that "the lock stopped
  * working" is diagnosable from the log instead of by reading middleware.
  */
-const OPTIONAL = ["CHANNEL_LOCK", "CHANNEL_LOCK_LINK"] as const;
+const OPTIONAL = ["CHANNEL_LOCK", "CHANNEL_LOCK_LINK", "WEBHOOK_SECRET"] as const;
 
 function missing(env: Env, names: readonly string[]): string[] {
   return names.filter((name) => {
