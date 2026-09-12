@@ -6,7 +6,7 @@
     "typecheck": "tsc --noEmit",
     "deploy": "wrangler deploy",
     "poll": "tsx src/poll.ts",
-    "poll:watch": "nodemon --verbose --watch src --ext ts,json --exec \"pnpm poll\"",
+    "poll:watch": "tsx watch src/poll.ts",
     "smoke:wizards": "tsx scripts/smoke.wizards.ts",
     "check:i18n": "tsx scripts/check.i18n.ts",
     "check:layer": "tsx scripts/check.layer.ts",
