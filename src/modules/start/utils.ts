@@ -14,6 +14,24 @@ import {
 export const REFERRAL_BONUS = 20000;
 
 /**
+ * Whether a redeemed referral actually pays `REFERRAL_BONUS` into the inviter's
+ * balance.
+ *
+ * Off in this base on purpose. The wallet itself exists — the admin panel's
+ * balance lever and the `toman` formatter are built on it — but a template that
+ * moves real money the moment someone shares a link is a decision, not a
+ * default. Turn this on in a bot that has a wallet and `processReferral` below
+ * behaves exactly as it reads.
+ *
+ * Off, nothing is lost: the link still records the inviter, and the inviter
+ * still gets the join notice — only without the amount line.
+ *
+ * Same shape as the channel lock's `ON_CHECK_FAILURE`: one named constant, one
+ * documented flip, no hidden configuration.
+ */
+export const CREDIT_REFERRAL_BONUS = false;
+
+/**
  * Ensures the user exists in D1 and keeps their name/username updated.
  *
  * `lang` is written on insert only. It is the user's *choice* once they have one,
@@ -77,7 +95,7 @@ export async function processReferral(ctx: MyContext): Promise<void> {
     // 2. Atomically set referral ONLY IF the user doesn't already have one
     const linked = await redeemReferral(ctx.env.DB, newUserId, inviterId);
 
-    // 3. If successfully linked for the first time, credit and notify the inviter
+    // 3. If successfully linked for the first time, credit (opt-in) and notify
     if (linked) {
       // The credit is its own statement outside the notification try/catch. It used
       // to share one, whose catch was commented "inviter may have blocked the bot;
@@ -85,7 +103,11 @@ export async function processReferral(ctx: MyContext): Promise<void> {
       // written for a Telegram failure, and the referral was consumed (`referral` is
       // now set, so this branch never runs again) without the bonus ever landing.
       // A failed credit is logged by `creditBalance` itself.
-      if (!(await creditBalance(ctx.env.DB, inviterId, REFERRAL_BONUS, "referral_bonus"))) {
+      //
+      // Gated by `CREDIT_REFERRAL_BONUS`: with the payout off, none of this runs
+      // and the notice below goes out without the amount line.
+      if (CREDIT_REFERRAL_BONUS &&
+          !(await creditBalance(ctx.env.DB, inviterId, REFERRAL_BONUS, "referral_bonus"))) {
         return;
       }
 
@@ -95,19 +117,23 @@ export async function processReferral(ctx: MyContext): Promise<void> {
       const newUserDisplay =
           ctx.from?.first_name || _i("common.user_with_id", { id: newUserId });
 
+      const notice = CREDIT_REFERRAL_BONUS
+        ? _i("messages.referral_added_by_you", {
+            newUserId: newUserId.toString(),
+            newUserDisplay: esc(newUserDisplay),
+            amount: toman(_i, REFERRAL_BONUS),
+          })
+        : _i("messages.referral_linked_by_you", {
+            newUserId: newUserId.toString(),
+            newUserDisplay: esc(newUserDisplay),
+          });
+
       try {
-        await ctx.api.sendMessage(
-            inviterId,
-            _i("messages.referral_added_by_you", {
-              newUserId: newUserId.toString(),
-              newUserDisplay: esc(newUserDisplay),
-              amount: toman(_i, REFERRAL_BONUS),
-            }),
-            { parse_mode: "HTML" },
-        );
+        await ctx.api.sendMessage(inviterId, notice, { parse_mode: "HTML" });
       } catch (notifyErr) {
-        // Inviter may have blocked the bot. The bonus is already credited, which is
-        // the part that matters; they will see it next time they open the wallet.
+        // Inviter may have blocked the bot. The link is recorded either way, which
+        // is the part that matters; they will see the notice next time they open
+        // the bot.
       }
     }
   } catch (err) {

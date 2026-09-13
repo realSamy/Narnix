@@ -91,6 +91,7 @@
   },
   "messages": {
     "referral_added_by_you": "🎁 <b>کاربر جدید با لینک دعوت شما عضو شد:</b>\n👤 {{newUserDisplay}} (<code>{{newUserId}}</code>)\n\nمبلغ {{amount}} به کیف پول شما واریز شد.",
+    "referral_linked_by_you": "🎁 <b>کاربر جدید با لینک دعوت شما عضو شد:</b>\n👤 {{newUserDisplay}} (<code>{{newUserId}}</code>)",
     "referral_not_exists": "لینک معرف اشتباهه یا منقضی شده",
     "referral_self_forbidden": "نمیتونی از لینک رفرال خودت استفاده کنی!"
   },

@@ -91,6 +91,7 @@
   },
   "messages": {
     "referral_added_by_you": "🎁 <b>Someone joined with your invite link:</b>\n👤 {{newUserDisplay}} (<code>{{newUserId}}</code>)\n\n{{amount}} has been credited to your wallet.",
+    "referral_linked_by_you": "🎁 <b>Someone joined with your invite link:</b>\n👤 {{newUserDisplay}} (<code>{{newUserId}}</code>)",
     "referral_not_exists": "That referral link is wrong or has expired.",
     "referral_self_forbidden": "You can't use your own referral link!"
   },
