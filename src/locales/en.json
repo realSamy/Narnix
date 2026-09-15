@@ -58,18 +58,11 @@
     "join_channel": "Join Channel"
   },
   "common": {
-    "activate": "🟢 Activate",
-    "active": "🟢 Active",
     "back": "🔙 Back",
     "back_to_main": "🔙 Back to main menu",
-    "deactivate": "🔴 Deactivate",
     "delete": "🗑 Delete",
     "free": "Free",
-    "inactive": "🔴 Inactive",
-    "next": "Next ›",
     "no_username": "no username",
-    "none": "—",
-    "prev": "‹ Prev",
     "text_direction": "ltr",
     "toman": "{{amount}} Toman",
     "unexpected_error": "⚠️ Something went wrong. Please try again in a moment.",

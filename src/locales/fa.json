@@ -58,18 +58,11 @@
     "join_channel": "عضویت در کانال"
   },
   "common": {
-    "activate": "🟢 فعال‌سازی",
-    "active": "🟢 فعال",
     "back": "🔙 بازگشت",
     "back_to_main": "🔙 بازگشت به منوی اصلی",
-    "deactivate": "🔴 غیرفعال‌سازی",
     "delete": "🗑 حذف",
     "free": "رایگان",
-    "inactive": "🔴 غیرفعال",
-    "next": "بعدی ›",
     "no_username": "بدون یوزرنیم",
-    "none": "—",
-    "prev": "‹ قبلی",
     "text_direction": "rtl",
     "toman": "{{amount}} تومان",
     "unexpected_error": "⚠️ خطای غیرمنتظره‌ای رخ داد. لطفاً چند لحظه بعد دوباره تلاش کنید.",

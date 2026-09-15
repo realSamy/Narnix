@@ -1,7 +1,6 @@
 import {Context, SessionFlavor} from "grammy";
 import {Conversation, ConversationFlavor} from "@grammyjs/conversations";
 import {Env} from "./index";
-import {CouponType} from "./database";
 import {SupportedLanguage, TranslationPath} from "./i18n";
 
 /**
@@ -21,44 +20,7 @@ import {SupportedLanguage, TranslationPath} from "./i18n";
  *
  * Do not add form steps here. Add a conversation.
  */
-type Step =
-  'idle'
-  | 'awaiting_receipt';
-
-// A coupon that has been validated and attached to the in-progress cart
-interface CartCoupon {
-  id: number;
-  code: string;
-  type: CouponType;
-  value: number;
-}
-
-/**
- * A purchase in progress: which package, which optional locations, which coupon.
- *
- * Renewals use this same cart. `renewConfigId` is the only thing that distinguishes
- * them, and it is read in exactly one place — the branch in `shop_confirm_buy` that
- * chooses between provisioning a new client and updating an existing one. Everything
- * before that point (picking a package, toggling locations, pricing, the coupon, the
- * invoice, the atomic balance deduction) is deliberately identical, because the two
- * bugs this replaced — renewals charging nothing, and renewals silently dropping
- * purchased locations — both came from renewal having its own copy of that logic.
- */
-interface Cart {
-  packageId: number;
-  panelId: number;
-  selectedInboundIds: number[];
-  coupon?: CartCoupon;
-
-  /**
-   * Set when this cart renews an existing `configs` row rather than creating one.
-   *
-   * Panel-scoped by construction: the config's `email` and `sub_id` are registered
-   * on one panel, so a renewal can only offer packages from that same panel and this
-   * id always belongs to `panelId`.
-   */
-  renewConfigId?: number;
-}
+type Step = 'idle';
 
 // Custom session data
 interface SessionData {
@@ -76,13 +38,6 @@ interface SessionData {
 
   /** Inviter id captured from a `?start=ref_<id>` deep link, consumed once. */
   referral?: number;
-
-  // --- Card-to-card deposit, in flight ---
-  /** The `transactions.id` a pending receipt upload belongs to. */
-  activeTransactionId?: string;
-  /** Amount chosen on the deposit screen, read back when a gateway is picked. */
-  depositAmount?: number;
-  cart?: Cart;
 }
 
 /**
