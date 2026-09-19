@@ -17,6 +17,20 @@
   "name": "narnix",
   "description": "A Telegram bot base for Cloudflare Workers: grammY, D1, i18n, wizards, tickets, broadcasts.",
   "version": "1.0.0",
+  "license": "MIT",
+  "keywords": [
+    "telegram",
+    "bot",
+    "grammy",
+    "cloudflare-workers",
+    "d1",
+    "template",
+    "i18n"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realSamy/narnix.git"
+  },
   "dependencies": {
     "@grammyjs/conversations": "^2.1.1",
     "grammy": "^1.45.1"

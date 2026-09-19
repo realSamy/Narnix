@@ -127,6 +127,7 @@ Optional — each one's absence disables a feature rather than breaking the bot:
 | --- | --- |
 | `CHANNEL_LOCK` | Channel users must join before the bot answers them. A `@username` or numeric id. Leave empty to disable the gate entirely. |
 | `CHANNEL_LOCK_LINK` | The invite link shown on the "join first" screen. |
+| `WEBHOOK_SECRET` | Shared secret for the webhook: updates whose `X-Telegram-Bot-Api-Secret-Token` header does not match are rejected before any handler runs. See [step 6](#6-run-it). |
 | `LOCAL_PROXY` | SOCKS proxy for reaching Telegram from a network that blocks it. Read only by `src/poll.ts`; never set this in production. |
 
 If you do not know your own user id, message [@userinfobot](https://t.me/userinfobot),
@@ -145,7 +146,7 @@ secrets do not. If you ever do commit a token, rotate it immediately with `/toke
 @BotFather; a token in git history is compromised even after you delete the file.
 
 Both `wrangler dev` and `getPlatformProxy()` (used by `src/poll.ts` and by
-`smoke.wizards.ts`) read `.dev.vars` automatically.
+`scripts/smoke.wizards.ts`) read `.dev.vars` automatically.
 
 ### In production
 
@@ -177,7 +178,7 @@ pnpm db:migrate          # local (.wrangler/state — no Cloudflare credentials 
 pnpm db:migrate:remote   # the real D1
 ```
 
-`migrations/` currently holds three files:
+`migrations/` currently holds four files:
 
 - `0001_baseline.sql` — users, admins, conversations, broadcasts, tickets,
   ticket_messages, plus their indexes.
@@ -187,6 +188,9 @@ pnpm db:migrate:remote   # the real D1
   when it next opens, instead of being announced and then dropped.
 - `0003_user_message_style.sql` — adds `simple_messages_at` and `style_hint_at` to
   `users`, backing the `/simple` toggle between rich and plain transcripts.
+- `0004_broadcast_lease.sql` — adds `lease_until` to `broadcasts`, so two overlapping
+  cron invocations cannot deliver the same batch twice. The claim is a conditional
+  UPDATE; see `claimBatch` in `src/core/db/repositories/broadcasts.ts`.
 
 Conventions, spelled out at the top of `0001`: never edit an applied migration — add a
 new numbered file. `wrangler d1 migrations apply` records which files it has run, so
@@ -206,16 +210,16 @@ npx wrangler d1 execute narnix-db --local \
   --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
 ```
 
-`0002` and `0003` both work by `ALTER TABLE ... ADD COLUMN`, so no new table appears and
-the query above cannot see them. Ask for the columns by name instead:
+`0002`, `0003` and `0004` all work by `ALTER TABLE ... ADD COLUMN`, so no new table appears
+and the query above cannot see them. Ask for the columns by name instead:
 
 ```bash
 npx wrangler d1 execute narnix-db --local \
-  --command "SELECT 'ticket_messages' AS tbl, name FROM pragma_table_info('ticket_messages') WHERE name IN ('content_type','preview','delivered_at') UNION ALL SELECT 'users', name FROM pragma_table_info('users') WHERE name IN ('simple_messages_at','style_hint_at')"
+  --command "SELECT 'ticket_messages' AS tbl, name FROM pragma_table_info('ticket_messages') WHERE name IN ('content_type','preview','delivered_at') UNION ALL SELECT 'users', name FROM pragma_table_info('users') WHERE name IN ('simple_messages_at','style_hint_at') UNION ALL SELECT 'broadcasts', name FROM pragma_table_info('broadcasts') WHERE name = 'lease_until'"
 ```
 
-Five rows back — three for `0002`, two for `0003` — means both applied. Swap `--local`
-for `--remote` to check production.
+Six rows back — three for `0002`, two for `0003`, one for `0004` — means all applied. Swap
+`--local` for `--remote` to check production.
 
 ## 6. Run it
 
@@ -264,12 +268,16 @@ curl -s "https://api.telegram.org/bot<YOUR_TOKEN>/getWebhookInfo"
 `pending_update_count` climbing along with a `last_error_message` means Telegram is
 reaching the Worker but the Worker is failing; `npx wrangler tail` will show why.
 
-One thing to know about the endpoint as shipped: it accepts any POST and does not
-verify Telegram's `X-Telegram-Bot-Api-Secret-Token` header, so the URL is the only
-thing keeping strangers from injecting updates. The URL is not secret — it is your
-`workers.dev` hostname. If that matters for your bot, set a `secret_token` on
-`setWebhook` and pass the matching `secretToken` option to `webhookCallback` in
-`src/index.ts`.
+The endpoint as shipped still degrades gracefully rather than breaking: with
+`WEBHOOK_SECRET` unset it accepts any POST, and the URL — not secret; it is your
+`workers.dev` hostname — is the only thing keeping strangers from injecting updates.
+Set a `secret_token` on `setWebhook` and the same value as the `WEBHOOK_SECRET`
+secret (`wrangler secret put WEBHOOK_SECRET`), and grammY rejects everything else
+with a 401 before any handler runs:
+
+```bash
+curl -s "https://api.telegram.org/bot<YOUR_TOKEN>/setWebhook?url=https://<name>.<subdomain>.workers.dev&secret_token=<YOUR_SECRET>"
+```
 
 Cron Triggers are registered by `wrangler deploy` from the `triggers.crons` array. One
 expression ships: `* * * * *`, which drains the broadcast queue and is a no-op when
@@ -281,10 +289,12 @@ nothing is queued. To exercise it locally, `wrangler dev --test-scheduled` and h
 ```bash
 pnpm typecheck       # tsc --noEmit
 pnpm check:i18n      # locale audit
+pnpm check:layer     # data-layer audit
+pnpm test            # vitest unit tests
 pnpm smoke:wizards   # drives every wizard against local D1
 ```
 
-These three are what CI runs (`.github/workflows/ci.yml`). Run them before pushing.
+These five are what CI runs (`.github/workflows/ci.yml`). Run them before pushing.
 
 - **`pnpm typecheck`** covers `src/**` only. Note that translation keys are typed, so a
   mistyped `ctx._("...")` key is a compile error here rather than a raw key appearing
@@ -293,6 +303,12 @@ These three are what CI runs (`.github/workflows/ci.yml`). Run them before pushi
   keys in `en.json` with no `fa.json` counterpart. It also *reports*, without failing,
   keys missing from `en.json`, unused keys, and Persian string literals still inline in
   `src/`. Those three are debt reports, not build breakers.
+- **`pnpm check:layer`** fails if SQL is prepared anywhere outside the data layer —
+  `src/core/db/` for shared tables, a module's own `repo.ts` for the tables it owns.
+  If it fails on your new handler, that query belongs in a repository function; see
+  "The data layer" in the README.
+- **`pnpm test`** runs the vitest suite: query construction against a recording D1
+  stub, plus the wizard/i18n helpers. Needs no credentials, no migrations, no network.
 - **`pnpm smoke:wizards`** needs the local database migrated first (`pnpm db:migrate`) —
   it reads and writes real tables in `.wrangler/state`. It does not need `.dev.vars`,
   real credentials, or network access: every Bot API call is answered by a stub and it
