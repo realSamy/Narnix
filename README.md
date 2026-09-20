@@ -202,26 +202,26 @@ node_broadcast_drain -->|"records reachability"| node_db_repositories
 %% Source links
 %% =========================
 
-click node_worker_entry "https://github.com/realsamy/narnix/blob/main/src/index.ts"
-click node_bot_assembly "https://github.com/realsamy/narnix/blob/main/src/core/bot.ts"
-click node_module_registry "https://github.com/realsamy/narnix/blob/main/src/core/registry.ts"
-click node_channel_gate "https://github.com/realsamy/narnix/blob/main/src/middlewares/channelLock.ts"
-click node_error_handler "https://github.com/realsamy/narnix/blob/main/src/core/errorHandler.ts"
+click node_worker_entry "src/index.ts"
+click node_bot_assembly "src/core/bot.ts"
+click node_module_registry "src/core/registry.ts"
+click node_channel_gate "src/middlewares/channelLock.ts"
+click node_error_handler "src/core/errorHandler.ts"
 
-click node_start_module "https://github.com/realsamy/narnix/blob/main/src/modules/start/index.ts"
-click node_language_module "https://github.com/realsamy/narnix/blob/main/src/modules/language/index.ts"
-click node_ticket_module "https://github.com/realsamy/narnix/blob/main/src/modules/ticket/index.ts"
-click node_admin_module "https://github.com/realsamy/narnix/blob/main/src/modules/admin/index.ts"
-click node_wizard_runtime "https://github.com/realsamy/narnix/blob/main/src/core/wizard.ts"
-click node_i18n "https://github.com/realsamy/narnix/blob/main/src/utils/i18n.ts"
+click node_start_module "src/modules/start/index.ts"
+click node_language_module "src/modules/language/index.ts"
+click node_ticket_module "src/modules/ticket/index.ts"
+click node_admin_module "src/modules/admin/index.ts"
+click node_wizard_runtime "src/core/wizard.ts"
+click node_i18n "src/utils/i18n.ts"
 
 click node_db_repositories "https://github.com/realsamy/narnix/tree/main/src/core/db/repositories"
-click node_ticket_repo "https://github.com/realsamy/narnix/blob/main/src/modules/ticket/repo.ts"
-click node_conversation_storage "https://github.com/realsamy/narnix/blob/main/src/core/conversationStorage.ts"
-click node_kv_sessions "https://github.com/realsamy/narnix/blob/main/src/utils/kvStorage.ts"
+click node_ticket_repo "src/modules/ticket/repo.ts"
+click node_conversation_storage "src/core/conversationStorage.ts"
+click node_kv_sessions "src/utils/kvStorage.ts"
 
-click node_job_dispatcher "https://github.com/realsamy/narnix/blob/main/src/jobs/index.ts"
-click node_broadcast_drain "https://github.com/realsamy/narnix/blob/main/src/jobs/broadcast.ts"
+click node_job_dispatcher "src/jobs/index.ts"
+click node_broadcast_drain "src/jobs/broadcast.ts"
 
 
 %% =========================
