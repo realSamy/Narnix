@@ -79,6 +79,170 @@ scripts/          the audit harnesses: check.i18n, check.layer, smoke.wizards
 migrations/       numbered .sql files, applied by wrangler
 ```
 
+```mermaid
+flowchart LR
+
+subgraph external["External"]
+  direction TB
+  node_telegram_user(("Telegram User"))
+  node_cron_trigger(("Cron Trigger"))
+  node_telegram_api["Telegram API"]
+end
+
+subgraph group_runtime["Bot Runtime"]
+  direction TB
+  node_worker_entry["Worker Entry<br/>[index.ts]"]
+  node_bot_assembly["Bot Assembly<br/>[bot.ts]"]
+  node_module_registry["Module Registry<br/>[registry.ts]"]
+  node_channel_gate["Channel Gate<br/>[channelLock.ts]"]
+  node_error_handler["Error Handler<br/>[errorHandler.ts]"]
+end
+
+subgraph group_features["Bot Features"]
+  direction TB
+  node_start_module["Start Module<br/>[index.ts]"]
+  node_language_module["Language Module<br/>[index.ts]"]
+  node_ticket_module["Ticket Module<br/>[index.ts]"]
+  node_admin_module["Admin Module<br/>[index.ts]"]
+  node_wizard_runtime["Wizard Runtime<br/>[wizard.ts]"]
+  node_i18n["Translation Service<br/>[i18n.ts]"]
+end
+
+subgraph group_persistence["State Layer"]
+  direction TB
+  node_db_repositories["Core Repositories"]
+  node_ticket_repo["Ticket Repository<br/>[repo.ts]"]
+  node_conversation_storage["Conversation Storage"]
+  node_d1[("D1 Database")]
+  node_kv_sessions[("KV Sessions<br/>[kvStorage.ts]")]
+end
+
+subgraph group_background["Background Work"]
+  direction TB
+  node_job_dispatcher["Job Dispatcher<br/>[index.ts]"]
+  node_broadcast_drain["Broadcast Drain<br/>[broadcast.ts]"]
+end
+
+
+%% =========================
+%% Runtime flow
+%% =========================
+
+node_telegram_user -->|"sends updates"| node_worker_entry
+node_cron_trigger -->|"starts schedule"| node_worker_entry
+
+node_worker_entry -->|"creates bot"| node_bot_assembly
+node_bot_assembly -->|"loads modules"| node_module_registry
+node_bot_assembly -->|"mounts middleware"| node_channel_gate
+
+%% =========================
+%% Module dispatch
+%% =========================
+
+node_module_registry -->|"dispatches routes"| node_start_module
+node_module_registry -->|"dispatches routes"| node_language_module
+node_module_registry -->|"dispatches routes"| node_ticket_module
+node_module_registry -->|"dispatches routes"| node_admin_module
+
+%% =========================
+%% Feature dependencies
+%% =========================
+
+node_start_module -->|"upserts users"| node_db_repositories
+
+node_language_module -->|"updates language"| node_db_repositories
+node_language_module -->|"changes translator"| node_i18n
+
+node_ticket_module -->|"reads tickets"| node_ticket_repo
+node_ticket_module -->|"relays messages"| node_telegram_api
+
+node_admin_module -->|"starts wizards"| node_wizard_runtime
+node_admin_module -->|"manages records"| node_db_repositories
+
+%% =========================
+%% State
+%% =========================
+
+node_ticket_repo -->|"reads / writes"| node_d1
+node_wizard_runtime -->|"replays state"| node_conversation_storage
+node_conversation_storage -->|"stores logs"| node_d1
+
+node_db_repositories -->|"reads / writes"| node_d1
+node_bot_assembly -->|"stores sessions"| node_kv_sessions
+
+%% =========================
+%% Runtime support
+%% =========================
+
+node_error_handler -->|"stamps blocked users"| node_db_repositories
+
+node_channel_gate -.->|"checks membership"| node_telegram_api
+
+%% =========================
+%% Telegram API
+%% =========================
+
+node_start_module -->|"renders menus"| node_telegram_api
+node_language_module -->|"renders language"| node_telegram_api
+node_admin_module -->|"renders controls"| node_telegram_api
+
+%% =========================
+%% Background jobs
+%% =========================
+
+node_worker_entry -->|"runs cron"| node_job_dispatcher
+node_job_dispatcher -->|"dispatches drain"| node_broadcast_drain
+
+node_broadcast_drain -->|"claims recipients"| node_d1
+node_broadcast_drain -->|"sends batches"| node_telegram_api
+node_broadcast_drain -->|"records reachability"| node_db_repositories
+
+
+%% =========================
+%% Source links
+%% =========================
+
+click node_worker_entry "https://github.com/realsamy/narnix/blob/main/src/index.ts"
+click node_bot_assembly "https://github.com/realsamy/narnix/blob/main/src/core/bot.ts"
+click node_module_registry "https://github.com/realsamy/narnix/blob/main/src/core/registry.ts"
+click node_channel_gate "https://github.com/realsamy/narnix/blob/main/src/middlewares/channelLock.ts"
+click node_error_handler "https://github.com/realsamy/narnix/blob/main/src/core/errorHandler.ts"
+
+click node_start_module "https://github.com/realsamy/narnix/blob/main/src/modules/start/index.ts"
+click node_language_module "https://github.com/realsamy/narnix/blob/main/src/modules/language/index.ts"
+click node_ticket_module "https://github.com/realsamy/narnix/blob/main/src/modules/ticket/index.ts"
+click node_admin_module "https://github.com/realsamy/narnix/blob/main/src/modules/admin/index.ts"
+click node_wizard_runtime "https://github.com/realsamy/narnix/blob/main/src/core/wizard.ts"
+click node_i18n "https://github.com/realsamy/narnix/blob/main/src/utils/i18n.ts"
+
+click node_db_repositories "https://github.com/realsamy/narnix/tree/main/src/core/db/repositories"
+click node_ticket_repo "https://github.com/realsamy/narnix/blob/main/src/modules/ticket/repo.ts"
+click node_conversation_storage "https://github.com/realsamy/narnix/blob/main/src/core/conversationStorage.ts"
+click node_kv_sessions "https://github.com/realsamy/narnix/blob/main/src/utils/kvStorage.ts"
+
+click node_job_dispatcher "https://github.com/realsamy/narnix/blob/main/src/jobs/index.ts"
+click node_broadcast_drain "https://github.com/realsamy/narnix/blob/main/src/jobs/broadcast.ts"
+
+
+%% =========================
+%% Styling
+%% =========================
+
+classDef toneNeutral fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
+classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
+classDef toneAmber fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
+classDef toneIndigo fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
+classDef toneTeal fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
+
+class node_worker_entry,node_bot_assembly,node_module_registry,node_channel_gate,node_error_handler,node_telegram_user toneBlue
+class node_start_module,node_language_module,node_ticket_module,node_admin_module,node_wizard_runtime,node_i18n toneAmber
+class node_d1,node_db_repositories,node_ticket_repo,node_conversation_storage,node_kv_sessions,node_telegram_api toneMint
+class node_job_dispatcher,node_broadcast_drain toneRose
+class node_cron_trigger toneIndigo
+```
+
 There are two entry points. `fetch` answers Telegram's webhook POSTs, and any other
 method gets a plain 200 that doubles as a health check. `scheduled` dispatches cron
 triggers, branching on the literal expression string from `wrangler.jsonc` — add a
